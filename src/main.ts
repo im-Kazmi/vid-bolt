@@ -87,6 +87,34 @@ interface DownloadProgress {
   eta: number
 }
 
+export interface PlaylistInfo {
+  title: string
+  thumbnail: string
+  channel: string
+  videoCount: number
+  videos: PlaylistVideo[]
+}
+
+export interface PlaylistVideo {
+  id: string
+  title: string
+  duration: string
+  thumbnail: string
+  channel: string
+}
+
+export interface PlaylistDownloadProgress {
+  currentVideo: number
+  totalVideos: number
+  videoTitle: string
+  overallPercent: number
+  videoPercent: number
+  downloaded: number
+  total: number
+  speed: number
+  eta: number
+}
+
 const formatDuration = (seconds: number): string => {
   if (!seconds || isNaN(seconds)) return '0:00'
   
@@ -391,6 +419,234 @@ const setupIpcHandlers = () => {
 
   ipcMain.handle('cancel-download', async () => {
     return true
+  })
+
+    ipcMain.handle('get-playlist-info', async (_event, url: string) => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        console.log('Fetching playlist info for URL:', url)
+        
+        if (!url || !url.includes('youtube.com') && !url.includes('youtu.be')) {
+          reject(new Error('Please enter a valid YouTube URL'))
+          return
+        }
+
+        const ytdlpPath = app.isPackaged ? getBundledBinaryPath('yt-dlp.exe') : 'yt-dlp';
+
+        const ytdlp = spawn(ytdlpPath, [
+          '--dump-json',
+          '--no-warnings',
+          '--no-check-certificate',
+          '--flat-playlist',
+          url
+        ])
+
+        let stdout = ''
+        let stderr = ''
+
+        ytdlp.stdout.on('data', (data) => {
+          const chunk = data.toString()
+          stdout += chunk
+        })
+
+        ytdlp.stderr.on('data', (data) => {
+          const chunk = data.toString()
+          stderr += chunk
+        })
+
+        ytdlp.on('close', (code) => {
+          if (code === 0) {
+            try {
+              const lines = stdout.trim().split('\n')
+              const videos: PlaylistVideo[] = []
+              
+              for (const line of lines) {
+                if (line.trim()) {
+                  const videoInfo = JSON.parse(line)
+                  videos.push({
+                    id: videoInfo.id,
+                    title: videoInfo.title,
+                    duration: formatDuration(videoInfo.duration || 0),
+                    thumbnail: videoInfo.thumbnail || '',
+                    channel: videoInfo.uploader || 'Unknown Channel'
+                  })
+                }
+              }
+
+              const playlistInfo: PlaylistInfo = {
+                title: videos[0]?.title || 'Unknown Playlist',
+                thumbnail: videos[0]?.thumbnail || '',
+                channel: videos[0]?.channel || 'Unknown Channel',
+                videoCount: videos.length,
+                videos: videos
+              }
+
+              console.log('Playlist info fetched:', playlistInfo)
+              resolve(playlistInfo)
+            } catch (parseError) {
+              console.error('JSON parse error:', parseError)
+              reject(new Error('Failed to parse playlist information'))
+            }
+          } else {
+            let errorMessage = 'Failed to fetch playlist information'
+            if (stderr.includes('Private')) {
+              errorMessage = 'This playlist is private and cannot be accessed'
+            } else if (stderr.includes('Unavailable')) {
+              errorMessage = 'This playlist is unavailable'
+            } else if (stderr) {
+              const firstLine = stderr.split('\n')[0]
+              if (firstLine && firstLine.trim()) {
+                errorMessage = firstLine.trim()
+              }
+            }
+            reject(new Error(errorMessage))
+          }
+        })
+
+        ytdlp.on('error', (error) => {
+          console.error('yt-dlp spawn error:', error)
+          reject(new Error('YouTube downloader not available'))
+        })
+
+        const timeout = setTimeout(() => {
+          ytdlp.kill()
+          reject(new Error('Request timeout'))
+        }, 30000)
+
+        ytdlp.on('close', () => {
+          clearTimeout(timeout)
+        })
+
+      } catch (error) {
+        console.error('Unexpected error in get-playlist-info:', error)
+        reject(new Error('An unexpected error occurred'))
+      }
+    })
+  })
+
+  ipcMain.handle('download-playlist', async (_event, url: string, quality: string, outputPath: string) => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        console.log('Starting playlist download for URL:', url, 'Quality:', quality)
+
+        const ytdlpPath = app.isPackaged ? getBundledBinaryPath('yt-dlp.exe') : 'yt-dlp';
+        
+        let format = ''
+        if (quality === 'Audio Only') {
+          format = 'bestaudio[ext=m4a]/bestaudio/best'
+        } else {
+          const height = quality.replace('p', '')
+          format = `bestvideo[height<=${height}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${height}]+bestaudio/best[height<=${height}]`
+        }
+
+        const outputTemplate = path.join(outputPath, '%(playlist_title)s', '%(title)s.%(ext)s')
+
+        const ytdlpArgs = [
+          '-f', format,
+          '--merge-output-format', 'mp4',
+          '-o', outputTemplate,
+          '--ffmpeg-location', path.dirname(ffmpegPath),
+          '--newline',
+          '--progress',
+          '--no-mtime',
+          '--ignore-errors',
+          url
+        ]
+
+        console.log('yt-dlp playlist command:', ytdlpPath, ytdlpArgs.join(' '))
+
+        const ytdlp = spawn(ytdlpPath, ytdlpArgs)
+
+        let currentVideo = 1
+        let totalVideos = 0
+        let currentVideoTitle = ''
+        let videoProgress = {
+          percent: 0,
+          downloaded: 0,
+          total: 0,
+          speed: 0,
+          eta: 0
+        }
+
+        ytdlp.stdout.on('data', (data) => {
+          const output = data.toString()
+          console.log('yt-dlp output:', output.trim())
+
+          const downloadMatch = output.match(/\[download\] Downloading item (\d+) of (\d+)/)
+          if (downloadMatch) {
+            currentVideo = parseInt(downloadMatch[1])
+            totalVideos = parseInt(downloadMatch[2])
+          }
+
+          const titleMatch = output.match(/\[download\] Downloading video: (.+)/)
+          if (titleMatch) {
+            currentVideoTitle = titleMatch[1]
+          }
+
+          const progress = parseProgress(output)
+          if (progress) {
+            videoProgress = { ...videoProgress, ...progress }
+            
+            const overallPercent = totalVideos > 0 ? 
+              ((currentVideo - 1) / totalVideos * 100) + (videoProgress.percent / totalVideos) : 0
+
+            const playlistProgress: PlaylistDownloadProgress = {
+              currentVideo,
+              totalVideos,
+              videoTitle: currentVideoTitle,
+              overallPercent,
+              videoPercent: videoProgress.percent,
+              downloaded: videoProgress.downloaded,
+              total: videoProgress.total,
+              speed: videoProgress.speed,
+              eta: videoProgress.eta
+            }
+
+            console.log('Playlist progress:', playlistProgress)
+            
+            if (mainWindow) {
+              mainWindow.webContents.send('playlist-download-progress', playlistProgress)
+            }
+          }
+        })
+
+        ytdlp.stderr.on('data', (data) => {
+          console.log('yt-dlp stderr:', data.toString().trim())
+        })
+
+        ytdlp.on('close', (code) => {
+          console.log('yt-dlp playlist process closed with code:', code)
+          if (code === 0) {
+            console.log('Playlist download completed successfully')
+            if (mainWindow) {
+              mainWindow.webContents.send('playlist-download-progress', {
+                currentVideo: totalVideos,
+                totalVideos,
+                videoTitle: 'Complete',
+                overallPercent: 100,
+                videoPercent: 100,
+                downloaded: videoProgress.total || 1,
+                total: videoProgress.total || 1,
+                speed: 0,
+                eta: 0
+              })
+            }
+            setTimeout(() => resolve(undefined), 1000)
+          } else {
+            reject(new Error(`Playlist download failed with code ${code}`))
+          }
+        })
+
+        ytdlp.on('error', (error) => {
+          console.error('yt-dlp error:', error)
+          reject(new Error(`YouTube downloader not found: ${error.message}`))
+        })
+
+      } catch (error) {
+        console.error('Playlist download setup error:', error)
+        reject(error)
+      }
+    })
   })
 }
 

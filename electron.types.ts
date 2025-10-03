@@ -21,16 +21,30 @@ export interface DownloadProgress {
   eta: number
 }
 
-export interface ElectronAPI {
-  getVideoInfo: (url: string) => Promise<VideoInfo>
-  downloadVideo: (url: string, quality: string, outputPath: string) => Promise<void>
-  onDownloadProgress: (callback: (progress: DownloadProgress) => void) => void
-  selectDownloadPath: () => Promise<string | null>,
-  cancelDownload: (val:any) => any,
+export interface PlaylistInfo {
+  title: string
+  thumbnail: string
+  channel: string
+  videoCount: number
+  videos: PlaylistVideo[]
 }
 
-declare global {
-  interface Window {
-    electronAPI: ElectronAPI
-  }
+export interface PlaylistVideo {
+  id: string
+  title: string
+  duration: string
+  thumbnail: string
+  channel: string
+}
+
+export interface PlaylistDownloadProgress {
+  currentVideo: number
+  totalVideos: number
+  videoTitle: string
+  overallPercent: number
+  videoPercent: number
+  downloaded: number
+  total: number
+  speed: number
+  eta: number
 }

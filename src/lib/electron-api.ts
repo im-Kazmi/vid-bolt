@@ -1,4 +1,4 @@
-import { DownloadProgress, VideoInfo } from "@/electron.types"
+import { DownloadProgress, VideoInfo, PlaylistInfo, PlaylistDownloadProgress } from "@/electron.types"
 
 export const getVideoInfo = async (url: string): Promise<VideoInfo> => {
   if (!window.electronAPI) {
@@ -18,11 +18,11 @@ export const downloadVideo = async (
   return window.electronAPI.downloadVideo(url, quality, outputPath)
 }
 
-export const onDownloadProgress = (callback: (progress: DownloadProgress) => void): void => {
+export const onDownloadProgress = (callback: (progress: DownloadProgress) => void): (() => void) => {
   if (!window.electronAPI) {
     throw new Error('Electron API not available')
   }
-  window.electronAPI.onDownloadProgress(callback)
+  return window.electronAPI.onDownloadProgress(callback)
 }
 
 export const selectDownloadPath = async (): Promise<string | null> => {
@@ -32,10 +32,30 @@ export const selectDownloadPath = async (): Promise<string | null> => {
   return window.electronAPI.selectDownloadPath()
 }
 
-
-export const cancelDownload = async (url: string): Promise<boolean> => {
+export const cancelDownload = async (): Promise<boolean> => {
   if (!window.electronAPI) {
     throw new Error('Electron API not available')
   }
-  return window.electronAPI.cancelDownload(url)
+  return window.electronAPI.cancelDownload()
+}
+
+export const getPlaylistInfo = async (url: string): Promise<PlaylistInfo> => {
+  if (!window.electronAPI) {
+    throw new Error('Electron API not available')
+  }
+  return window.electronAPI.getPlaylistInfo(url)
+}
+
+export const downloadPlaylist = async (url: string, quality: string, outputPath: string): Promise<void> => {
+  if (!window.electronAPI) {
+    throw new Error('Electron API not available')
+  }
+  return window.electronAPI.downloadPlaylist(url, quality, outputPath)
+}
+
+export const onPlaylistDownloadProgress = (callback: (progress: PlaylistDownloadProgress) => void): (() => void) => {
+  if (!window.electronAPI) {
+    throw new Error('Electron API not available')
+  }
+  return window.electronAPI.onPlaylistDownloadProgress(callback)
 }
