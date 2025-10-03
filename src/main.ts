@@ -29,7 +29,6 @@ const getBundledBinaryPath = (binaryName: string): string => {
 
 const getFfmpegPath = (): string => {
   if (app.isPackaged) {
-    // In packaged app - ffmpeg is in the unpacked resources
     const ffmpegPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'node_modules', 'ffmpeg-static', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
     
     if (fs.existsSync(ffmpegPath)) {
@@ -37,7 +36,6 @@ const getFfmpegPath = (): string => {
       return ffmpegPath;
     }
     
-    // Fallback: try the extraResources location
     const fallbackPath = path.join(process.resourcesPath, 'ffmpeg-static', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
     if (fs.existsSync(fallbackPath)) {
       console.log('Found ffmpeg in extraResources at:', fallbackPath);
@@ -46,7 +44,6 @@ const getFfmpegPath = (): string => {
     
     throw new Error(`FFmpeg not found. Checked: ${ffmpegPath} and ${fallbackPath}`);
   } else {
-    // In development
     const ffmpegStatic = require('ffmpeg-static');
     console.log('Development ffmpeg path:', ffmpegStatic);
     return ffmpegStatic as string;
@@ -56,7 +53,6 @@ const getFfmpegPath = (): string => {
 const ffmpegPath = getFfmpegPath();
 console.log('Using ffmpeg path:', ffmpegPath);
 
-// const ffmpegPath = require('ffmpeg-static').replace('app.asar', 'app.asar.unpacked')
 
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string
@@ -110,13 +106,11 @@ const setupIpcHandlers = () => {
       try {
         console.log('Fetching video info for URL:', url)
         
-        // Validate URL
         if (!url || !url.includes('youtube.com') && !url.includes('youtu.be')) {
           reject(new Error('Please enter a valid YouTube URL'))
           return
         }
 
-        // Use bundled yt-dlp in production, system yt-dlp in development
         const ytdlpPath = app.isPackaged ? getBundledBinaryPath('yt-dlp.exe') : 'yt-dlp';
         console.log('Using yt-dlp path:', ytdlpPath);
 
@@ -256,10 +250,8 @@ const setupIpcHandlers = () => {
         console.log('Starting download for URL:', url, 'Quality:', quality)
         console.log('Using bundled ffmpeg at:', ffmpegPath)
 
-        // Use bundled yt-dlp
         const ytdlpPath = app.isPackaged ? getBundledBinaryPath('yt-dlp.exe') : 'yt-dlp';
         
-        // Get video info first
         const infoResult = await new Promise<any>((infoResolve, infoReject) => {
           const ytdlp = spawn(ytdlpPath, [
             '--dump-json',
@@ -398,17 +390,13 @@ const setupIpcHandlers = () => {
   })
 
   ipcMain.handle('cancel-download', async () => {
-    // This would need to track the active download process
-    // For now, we'll just return true
     return true
   })
 }
 
-// Improved progress parsing function
 const parseProgress = (line: string): Partial<DownloadProgress> | null => {
   console.log('Parsing line:', line.trim())
   
-  // Match progress like: [download]  62.7% of ~ 201.84MiB at 3.47MiB/s ETA 00:31
   const progressMatch = line.match(/\[download\]\s+(\d+\.?\d*)%\s+of\s+~?\s*(\d+\.?\d*)([KMG]?iB)?.*?at\s+(\d+\.?\d*)([KMG]?iB)?\/s.*?ETA\s+(\d+):(\d+)/)
   
   if (progressMatch) {
@@ -444,7 +432,6 @@ const parseProgress = (line: string): Partial<DownloadProgress> | null => {
     return progress
   }
 
-  // Match simpler format: [download] 12.5% of 45.21MiB
   const simpleMatch = line.match(/\[download\]\s+(\d+\.?\d*)%\s+of\s+~?\s*(\d+\.?\d*)([KMG]?iB)/)
   if (simpleMatch) {
     const percent = parseFloat(simpleMatch[1])
@@ -471,7 +458,6 @@ const parseProgress = (line: string): Partial<DownloadProgress> | null => {
     return progress
   }
 
-  // Also try to match simpler percentage-only progress
   const simplePercentMatch = line.match(/\[download\]\s+(\d+\.?\d*)%/)
   if (simplePercentMatch) {
     const percent = parseFloat(simplePercentMatch[1])
